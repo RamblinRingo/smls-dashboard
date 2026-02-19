@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shawnee County SMLS Weekly Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2330; --border: #2a3441;
+    --text: #e6edf3; --muted: #7d8590; --green: #3fb950; --green-bg: #0d2818;
+    --red: #f85149; --red-bg: #2d0f0e; --accent: #58a6ff; --accent2: #f0883e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Barlow', sans-serif; min-height: 100vh; padding: 20px; }
+
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .header-left { display: flex; align-items: baseline; gap: 16px; }
+  .header h1 { font-family: 'Barlow Condensed', sans-serif; font-size: 28px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; }
+  .header h1 span { color: var(--accent); }
+  .week-badge { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+  .header-right { display: flex; align-items: center; gap: 10px; }
+  .last-updated { font-size: 12px; color: var(--muted); }
+  .refresh-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; color: var(--accent); font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 1px; cursor: pointer; text-transform: uppercase; transition: all 0.2s; }
+  .refresh-btn:hover { background: var(--accent); color: #000; }
+  .debug-toggle { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 5px 10px; color: var(--muted); font-size: 11px; cursor: pointer; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 1px; }
+
+  .status-bar { text-align: center; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 20px; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 1px; text-transform: uppercase; }
+  .status-bar.loading { background: #1c2a1c; color: var(--muted); border: 1px solid var(--border); }
+  .status-bar.success { background: var(--green-bg); color: var(--green); border: 1px solid #1a4a2a; }
+  .status-bar.error { background: var(--red-bg); color: var(--red); border: 1px solid #4a1a1a; }
+
+  .kpi-section { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+  .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; position: relative; overflow: hidden; }
+  .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--border); }
+  .kpi-card.up::before { background: var(--green); }
+  .kpi-card.down::before { background: var(--red); }
+  .kpi-card.neutral::before { background: var(--accent); }
+  .kpi-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .kpi-main { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+  .kpi-value { font-family: 'Barlow Condensed', sans-serif; font-size: 42px; font-weight: 900; line-height: 1; color: var(--text); }
+  .kpi-change { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 700; padding: 3px 10px; border-radius: 6px; line-height: 1; }
+  .kpi-change.up { background: var(--green-bg); color: var(--green); }
+  .kpi-change.down { background: var(--red-bg); color: var(--red); }
+  .kpi-change.neutral { background: var(--surface2); color: var(--muted); }
+  .kpi-sub { font-size: 12px; color: var(--muted); }
+  .kpi-sub span { color: var(--text); font-weight: 600; }
+
+  .market-share-section { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 120px; gap: 12px; margin-bottom: 20px; }
+  .ms-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .ms-card.highlight { border-color: var(--accent); background: linear-gradient(135deg, var(--surface) 0%, #0d1a2e 100%); }
+  .ms-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  .ms-value { font-family: 'Barlow Condensed', sans-serif; font-size: 32px; font-weight: 900; color: var(--text); line-height: 1; }
+  .ms-value.accent { color: var(--accent); }
+  .ms-delta-card { display: flex; align-items: center; justify-content: center; flex-direction: column; background: var(--red-bg); border: 1px solid #4a1a1a; border-radius: 10px; padding: 14px; }
+  .ms-delta-card.positive { background: var(--green-bg); border-color: #1a4a2a; }
+  .ms-delta-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .ms-delta-value { font-family: 'Barlow Condensed', sans-serif; font-size: 30px; font-weight: 900; color: var(--red); line-height: 1; }
+  .ms-delta-value.positive { color: var(--green); }
+
+  .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .chart-title { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+  .chart-container { position: relative; height: 380px; }
+
+  .debug-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px; display: none; }
+  .debug-section.visible { display: block; }
+  .debug-title { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .debug-content { font-family: monospace; font-size: 11px; color: #aaa; white-space: pre-wrap; max-height: 300px; overflow-y: auto; line-height: 1.6; }
+  .footer { text-align: center; font-size: 11px; color: var(--muted); padding-top: 16px; border-top: 1px solid var(--border); margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>Shawnee County <span>SMLS</span> Weekly Tracker</h1>
+    <div class="week-badge" id="weekBadge">Week —</div>
+  </div>
+  <div class="header-right">
+    <span class="last-updated" id="lastUpdated">Loading...</span>
+    <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
+    <button class="debug-toggle" onclick="document.getElementById('debugSection').classList.toggle('visible')">Debug</button>
+  </div>
+</div>
+
+<div class="status-bar loading" id="statusBar">Connecting to Google Sheets...</div>
+
+<div class="kpi-section">
+  <div class="kpi-card neutral" id="activeCard">
+    <div class="kpi-label">Current Active</div>
+    <div class="kpi-main"><div class="kpi-value" id="currentActive">—</div><div class="kpi-change neutral" id="activeChange">—</div></div>
+    <div class="kpi-sub">Last Year: <span id="lastYearActive">—</span></div>
+  </div>
+  <div class="kpi-card neutral" id="ucCard">
+    <div class="kpi-label">Under Contract</div>
+    <div class="kpi-main"><div class="kpi-value" id="underContract">—</div><div class="kpi-change neutral" id="ucChange">—</div></div>
+    <div class="kpi-sub">Last Year: <span id="lastYearUC">—</span></div>
+  </div>
+  <div class="kpi-card neutral" id="newListingsCard">
+    <div class="kpi-label">New Listings Last 7</div>
+    <div class="kpi-main"><div class="kpi-value" id="newListings7">—</div><div class="kpi-change neutral" id="newListingsChange">—</div></div>
+    <div class="kpi-sub">Last Week: <span id="lastWeekNewListings">—</span></div>
+  </div>
+  <div class="kpi-card neutral" id="newUCCard">
+    <div class="kpi-label">New UC Last Week</div>
+    <div class="kpi-main"><div class="kpi-value" id="newUCWeek">—</div><div class="kpi-change neutral" id="newUCChange">—</div></div>
+    <div class="kpi-sub">Last Year: <span id="lastYearNewUC">—</span></div>
+  </div>
+</div>
+
+<div class="kpi-section" style="margin-bottom:12px;">
+  <div class="kpi-card neutral" id="sold30Card">
+    <div class="kpi-label">Last 30 Days Sold</div>
+    <div class="kpi-main"><div class="kpi-value" id="sold30">—</div><div class="kpi-change neutral" id="sold30Change">—</div></div>
+    <div class="kpi-sub">Last Year: <span id="lastYearSold30">—</span></div>
+  </div>
+  <div class="kpi-card neutral" id="sold7Card">
+    <div class="kpi-label">Last 7 Days Sold</div>
+    <div class="kpi-main"><div class="kpi-value" id="sold7">—</div><div class="kpi-change neutral" id="sold7Change">—</div></div>
+    <div class="kpi-sub">Last Year: <span id="lastYearSold7">—</span></div>
+  </div>
+  <div class="kpi-card neutral" style="grid-column: span 2;">
+    <div class="kpi-label">Data as of</div>
+    <div class="kpi-main"><div class="kpi-value" style="font-size:28px;" id="dataDate">—</div></div>
+    <div class="kpi-sub">Auto-refreshes from Google Sheets on page load</div>
+  </div>
+</div>
+
+<div class="market-share-section">
+  <div class="ms-card"><div class="ms-label">SAR Now Closed</div><div class="ms-value" id="sarNow">—</div></div>
+  <div class="ms-card"><div class="ms-label">TR Now Closed</div><div class="ms-value" id="trNow">—</div></div>
+  <div class="ms-card highlight"><div class="ms-label">Market Share (Current)</div><div class="ms-value accent" id="marketShareNow">—</div></div>
+  <div class="ms-card">
+    <div class="ms-label">Last Yr: SAR <span id="sarLastYr" style="font-size:13px;color:var(--muted);font-weight:400;"></span> | TR <span id="trLastYr" style="font-size:13px;color:var(--muted);font-weight:400;"></span></div>
+    <div class="ms-value" id="marketShareLastYr">—</div>
+  </div>
+  <div class="ms-delta-card" id="msDeltaCard">
+    <div class="ms-delta-label">Change</div>
+    <div class="ms-delta-value" id="marketShareDelta">—</div>
+  </div>
+</div>
+
+<div class="charts-grid">
+  <div class="chart-card">
+    <div class="chart-container"><canvas id="chartActive"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-container"><canvas id="chartUC"></canvas></div>
+  </div>
+</div>
+<div class="charts-grid">
+  <div class="chart-card">
+    <div class="chart-container"><canvas id="chartNewList"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-container"><canvas id="yoyChart"></canvas></div>
+  </div>
+</div>
+
+<div class="debug-section" id="debugSection">
+  <div class="debug-title">Debug Log</div>
+  <div class="debug-content" id="debugContent">No data yet.</div>
+</div>
+
+<div class="footer">Team Ringgold · Keller Williams One Legacy Partners · Shawnee County SMLS Dashboard</div>
+
+<script>
+const PROXY = ''; // No proxy needed — sheet is published publicly
+const CSV_SMLS    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQhrqV0zoOKhi8DcmU35xuP-_0nbQOHgoBa8hd8xxjx5oKtj12EXDk9vd78w2hdDmOgU6w_4OWr989E/pub?gid=2075966300&single=true&output=csv';
+const CSV_TRACKER = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQhrqV0zoOKhi8DcmU35xuP-_0nbQOHgoBa8hd8xxjx5oKtj12EXDk9vd78w2hdDmOgU6w_4OWr989E/pub?gid=1159637087&single=true&output=csv';
+
+let logs = [];
+function log(s) { logs.push(s); document.getElementById('debugContent').textContent = logs.join('\n'); }
+
+// Register datalabels plugin globally
+Chart.register(ChartDataLabels);
+
+function parseCSV(text) {
+  return text.trim().split('\n').map(line => {
+    const cols = []; let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') inQ = !inQ;
+      else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    cols.push(cur.trim());
+    return cols;
+  });
+}
+
+function num(v) {
+  if (v == null || v === '' || v === '#REF!' || v === '#N/A') return null;
+  const n = parseFloat(String(v).replace(/[^0-9.-]/g, ''));
+  return isNaN(n) ? null : n;
+}
+
+function pct(a, b) { if (a==null||b==null||b===0) return null; return Math.round(((a-b)/b)*100); }
+
+function setKPI(vid, cid, cardId, curr, last) {
+  const v=document.getElementById(vid), c=document.getElementById(cid), card=document.getElementById(cardId);
+  if (v) v.textContent = curr ?? '—';
+  const p = pct(curr, last);
+  if (c && p !== null) {
+    const up = p >= 0;
+    c.textContent = (up?'+':'') + p + '%';
+    c.className = 'kpi-change ' + (up?'up':'down');
+    if (card) card.className = 'kpi-card ' + (up?'up':'down');
+  }
+}
+
+function set(id, v) { const el=document.getElementById(id); if(el) el.textContent=(v!=null&&v!=='') ? v : '—'; }
+
+let chartActive=null, chartUC=null, chartNewList=null, yc=null;
+
+function buildYOYMultiChart(canvasId, titleText, colKey, color2023, color2024, color2025, color2026, rows, C, showYears) {
+  const SHOW_YEARS = showYears || ['2023','2024','2025','2026'];
+  const allColors = {'2023':color2023,'2024':color2024,'2025':color2025,'2026':color2026};
+  const colors = Object.fromEntries(SHOW_YEARS.map(k=>[k,allColors[k]]));
+  const widths  = {'2023':1.5,'2024':1.5,'2025':2,'2026':2.5};
+  const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Pre-pass: assign a year to every row by tracking month progression
+  // IMPORTANT: only process up to the last real data row (ci from main load)
+  // Find last row with actual active data first
+  let lastRealRow = rows.length - 1;
+  while (lastRealRow > 2 && (num(rows[lastRealRow][C.active]) === null || String(rows[lastRealRow][C.date]||'').trim() === '')) lastRealRow--;
+
+  // Anchor-based year assignment — we know lastRealRow = Feb 2026
+  // Walk backwards from that anchor assigning years based on month transitions
+  const ANCHOR_YEAR = 2026;
+  const ANCHOR_MONTH = 1; // February = index 1
+
+  const rowYears = [];
+  const rowMonths = [];
+
+  for (let i=0; i<rows.length; i++) {
+    const ds = String(rows[i][C.date]||'').trim();
+    const parts = ds.split('/');
+    rowMonths[i] = parts.length >= 2 ? parseInt(parts[0])-1 : -1;
+  }
+
+  rowYears[lastRealRow] = ANCHOR_YEAR;
+  let curYear = ANCHOR_YEAR;
+  let prevMonth = ANCHOR_MONTH;
+
+  // Walk backwards: when month jumps from low (Jan/Feb) to high (Nov/Dec), decrement year
+  for (let i=lastRealRow-1; i>=0; i--) {
+    const m = rowMonths[i];
+    if (m === -1) { rowYears[i] = curYear; continue; }
+    if (prevMonth <= 2 && m >= 10) curYear--;
+    rowYears[i] = curYear;
+    prevMonth = m;
+  }
+
+  // Build per-year data using pre-assigned years
+  const years = {};
+  for (let i=2; i<=lastRealRow; i++) {
+    const r = rows[i];
+    const v = num(r[colKey]);
+    if (v === null || !r[C.date]) continue;
+    const ds = String(r[C.date]).trim();
+    const parts = ds.split('/');
+    if (parts.length < 2) continue;
+    const month = parseInt(parts[0])-1;
+    const day   = parseInt(parts[1]);
+    if (isNaN(month)||isNaN(day)) continue;
+    const key = String(rowYears[i]);
+    if (!SHOW_YEARS.includes(key)) continue;
+    if (!years[key]) years[key] = [];
+    years[key].push({ x: month + day/31, y: v });
+  }
+
+  log(titleText+' lastRealRow='+lastRealRow+' colKey='+colKey+' value at lastRealRow='+num(rows[lastRealRow][colKey]));
+  const lastRows = [];
+  for (let i=Math.max(0,rows.length-10); i<rows.length; i++) {
+    lastRows.push('row'+i+':'+String(rows[i][C.date]||'').trim()+'='+rowYears[i]);
+  }
+  log('Row year assignments (last 10): '+lastRows.join(' | '));
+  // Show last 3 points for 2026
+  if (years['2026']) {
+    const last3 = years['2026'].slice(-3);
+    log(titleText+' 2026 last 3 pts: '+JSON.stringify(last3));
+  }
+
+  const keys = SHOW_YEARS.filter(k => years[k] && years[k].length > 0);
+  const existing = Chart.getChart(canvasId);
+  if (existing) existing.destroy();
+
+  return new Chart(document.getElementById(canvasId), {
+    type:'line',
+    data:{
+      datasets: keys.map(k=>({
+        label: k,
+        data: years[k],
+        borderColor: colors[k],
+        backgroundColor: 'transparent',
+        tension: 0.4,
+        pointRadius: k==='2026' ? 3 : 0,
+        pointHoverRadius: 5,
+        borderWidth: widths[k],
+        fill: false
+      }))
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        datalabels:{display:false},
+        legend:{ labels:{color:'#7d8590',font:{family:'Barlow Condensed',size:12},boxWidth:20,padding:16} },
+        title:{
+          display:true,
+          text: titleText.toUpperCase()+' — '+SHOW_YEARS.join(' / '),
+          color:'#e6edf3',
+          font:{family:'Barlow Condensed',size:13,weight:'700'},
+          align:'start', padding:{bottom:12}
+        },
+        tooltip:{
+          backgroundColor:'#1c2330',titleColor:'#7d8590',bodyColor:'#e6edf3',borderColor:'#2a3441',borderWidth:1,
+          callbacks:{ title: ctx => MONTHS[Math.min(Math.floor(ctx[0].parsed.x),11)] }
+        }
+      },
+      scales:{
+        x:{
+          type:'linear', min:0, max:12,
+          ticks:{ color:'#7d8590',font:{size:11},stepSize:1, callback: val => MONTHS[Math.round(val)]??'' },
+          grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'transparent'}
+        },
+        y:{
+          ticks:{color:'#7d8590',font:{size:10}},
+          grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'transparent'}
+        }
+      }
+    }
+  });
+}
+
+function buildIndividualCharts(rows, C) {
+  buildYOYMultiChart('chartActive',  'SMLS Active Listings',    C.active,   null,'#9b6b4a','#c8b400','#00ffcc', rows, C, ['2024','2025','2026']);
+  buildYOYMultiChart('chartUC',      'Under Contract',          C.uc,       null,'#9b6b4a','#c8b400','#f85149', rows, C, ['2024','2025','2026']);
+  buildYOYMultiChart('chartNewList', 'New Listings Last 7 Days',C.newList7, null,'#9b6b4a','#c8b400','#3fb950', rows, C, ['2024','2025','2026']);
+}
+
+function buildYOYChart(rows, C, trackerRows, trCol) {
+  const SHOW_YEARS = ['2024','2025','2026'];
+  const colors = {'2024':'#9b6b4a','2025':'#c8b400','2026':'#00ffcc'};
+  const widths  = {'2024':1.5,'2025':2,'2026':2.5};
+  const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Build a date→TR lookup from tracker tab
+  const trByDate = {};
+  for (let i=1; i<trackerRows.length; i++) {
+    const d = String(trackerRows[i][0]||'').trim();
+    const v = num(trackerRows[i][trCol]);
+    if (d && v !== null) trByDate[d] = v;
+  }
+  log('TR by date sample: '+JSON.stringify(Object.entries(trByDate).slice(0,5)));
+
+  // Find lastRealRow
+  let lastRealRow = rows.length - 1;
+  while (lastRealRow > 2 && (num(rows[lastRealRow][C.active]) === null || String(rows[lastRealRow][C.date]||'').trim() === '')) lastRealRow--;
+
+  // Build rowYears using anchor
+  const rowMonths = [];
+  for (let i=0; i<rows.length; i++) {
+    const ds = String(rows[i][C.date]||'').trim();
+    const parts = ds.split('/');
+    rowMonths[i] = parts.length >= 2 ? parseInt(parts[0])-1 : -1;
+  }
+  const rowYears = [];
+  rowYears[lastRealRow] = 2026;
+  let curYear = 2026, prevMonth = 1;
+  for (let i=lastRealRow-1; i>=0; i--) {
+    const m = rowMonths[i];
+    if (m === -1) { rowYears[i] = curYear; continue; }
+    if (prevMonth <= 2 && m >= 10) curYear--;
+    rowYears[i] = curYear;
+    prevMonth = m;
+  }
+
+  const years = {};
+  for (let i=2; i<=lastRealRow; i++) {
+    const r = rows[i];
+    const sar = num(r[C.sar]);
+    if (sar === null || sar === 0) continue;
+    const dateStr = String(r[C.date]||'').trim();
+    const tr = trByDate[dateStr];
+    if (tr == null) continue;
+    const ms = parseFloat(((tr / sar) * 100).toFixed(2));
+    const parts = dateStr.split('/');
+    if (parts.length < 2) continue;
+    const month = parseInt(parts[0])-1;
+    const day   = parseInt(parts[1]);
+    if (isNaN(month)||isNaN(day)) continue;
+    const key = String(rowYears[i]);
+    if (!SHOW_YEARS.includes(key)) continue;
+    if (!years[key]) years[key] = [];
+    years[key].push({ x: month + day/31, y: ms });
+  }
+
+  log('TR Market Share years: '+JSON.stringify(Object.fromEntries(Object.entries(years).map(([k,v])=>[k,v.length]))));
+  if (years['2026']) log('MS 2026 last 3: '+JSON.stringify(years['2026'].slice(-3)));
+
+  const keys = SHOW_YEARS.filter(k => years[k] && years[k].length > 0);
+  const existing = Chart.getChart('yoyChart');
+  if (existing) existing.destroy();
+
+  new Chart(document.getElementById('yoyChart'), {
+    type:'line',
+    data:{
+      datasets: keys.map(k=>({
+        label: k,
+        data: years[k],
+        borderColor: colors[k],
+        backgroundColor: 'transparent',
+        tension: 0.4,
+        pointRadius: k==='2026' ? 3 : 0,
+        pointHoverRadius: 5,
+        borderWidth: widths[k],
+        fill: false
+      }))
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        datalabels:{display:false},
+        legend:{ labels:{color:'#7d8590',font:{family:'Barlow Condensed',size:12},boxWidth:20,padding:16} },
+        title:{
+          display:true,
+          text:'TR MARKET SHARE — 2024 / 2025 / 2026',
+          color:'#e6edf3',
+          font:{family:'Barlow Condensed',size:13,weight:'700'},
+          align:'start', padding:{bottom:12}
+        },
+        tooltip:{
+          backgroundColor:'#1c2330',titleColor:'#7d8590',bodyColor:'#e6edf3',borderColor:'#2a3441',borderWidth:1,
+          callbacks:{
+            title: ctx => MONTHS[Math.min(Math.floor(ctx[0].parsed.x),11)],
+            label: ctx => ' '+ctx.dataset.label+': '+ctx.parsed.y+'%'
+          }
+        }
+      },
+      scales:{
+        x:{
+          type:'linear', min:0, max:12,
+          ticks:{ color:'#7d8590',font:{size:11},stepSize:1, callback: val => MONTHS[Math.round(val)]??'' },
+          grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'transparent'}
+        },
+        y:{
+          ticks:{ color:'#7d8590',font:{size:10}, callback: val => val+'%' },
+          grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'transparent'}
+        }
+      }
+    }
+  });
+}
+
+async function fetchCSV(url) {
+  // Try direct fetch first (works when sheet is published publicly)
+  try {
+    const res = await fetch(url, { mode: 'cors' });
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    return parseCSV(await res.text());
+  } catch(e) {
+    // Fallback to CORS proxy
+    log('Direct fetch failed, trying proxy: '+e.message);
+    const res = await fetch('https://corsproxy.io/?' + encodeURIComponent(url));
+    if (!res.ok) throw new Error('HTTP '+res.status+' (proxy)');
+    return parseCSV(await res.text());
+  }
+}
+
+async function loadData() {
+  logs=[];
+  const sb=document.getElementById('statusBar');
+  sb.className='status-bar loading'; sb.textContent='Connecting to Google Sheets...';
+  set('lastUpdated','Loading...');
+
+  try {
+    // Fetch both sheets in parallel
+    log('Fetching both tabs...');
+    const [smlsRows, trackerRows] = await Promise.all([
+      fetchCSV(CSV_SMLS),
+      fetchCSV(CSV_TRACKER).catch(e => { log('Tracker tab failed: '+e.message); return []; })
+    ]);
+
+    log('SMLS rows: '+smlsRows.length+' | Tracker rows: '+trackerRows.length);
+    log('SMLS row 1: '+smlsRows[1]?.join(' | '));
+    log('SMLS row 2: '+smlsRows[2]?.join(' | '));
+
+    if (smlsRows.length < 3) throw new Error('Not enough data in sheet');
+
+    // Find header row (contains "Current Active")
+    let headerRow = -1;
+    for (let i=0; i<Math.min(smlsRows.length,5); i++) {
+      if (smlsRows[i].join(',').includes('Current Active')) { headerRow=i; break; }
+    }
+    if (headerRow === -1) throw new Error('Could not find header row with "Current Active"');
+    log('Header row: '+headerRow+' → '+smlsRows[headerRow]?.join(' | '));
+
+    // Find the LAST occurrence of "Current Active" = clean block
+    const hdr = smlsRows[headerRow];
+    let cleanCol = -1;
+    for (let i=hdr.length-1; i>=0; i--) {
+      if (hdr[i].trim()==='Current Active') { cleanCol=i; break; }
+    }
+    if (cleanCol === -1) throw new Error('Could not locate clean "Current Active" column');
+
+    // Build column map from clean block
+    const C = {
+      date:        cleanCol - 1,
+      active:      cleanCol,
+      uc:          cleanCol + 1,
+      sold30:      cleanCol + 2,
+      sold7:       cleanCol + 3,
+      newUC:       cleanCol + 4,
+      newList7:    cleanCol + 5,
+      prevNewList: cleanCol + 6,
+      sar:         cleanCol + 7,
+    };
+    log('Col map: date='+C.date+' active='+C.active+' uc='+C.uc+' sold30='+C.sold30+' sold7='+C.sold7+' newUC='+C.newUC+' newList7='+C.newList7+' prevNewList='+C.prevNewList+' sar='+C.sar);
+
+    // Find TR Closed from Weekly Tracker Data tab (col I = index 8)
+    // Scan tracker header for "TR" column
+    let trCol = 8; // default col I
+    if (trackerRows.length > 1) {
+      const th = trackerRows[0];
+      for (let i=0; i<th.length; i++) {
+        if (th[i].toLowerCase().includes('tr') && (th[i].toLowerCase().includes('closed')||th[i].toLowerCase().includes('now'))) {
+          trCol=i; break;
+        }
+      }
+      log('Tracker header: '+trackerRows[0]?.join(' | '));
+      log('TR col: '+trCol);
+    }
+
+    // Find last data row in SMLS sheet
+    let ci = smlsRows.length-1;
+    while (ci > headerRow+1 && num(smlsRows[ci][C.active])===null) ci--;
+    const r = smlsRows[ci];
+    const lyRow = Math.max(headerRow+1, ci-52);
+    const ly = smlsRows[lyRow] || [];
+    log('Current row '+ci+': date='+r[C.date]+' active='+r[C.active]+' uc='+r[C.uc]+' sold30='+r[C.sold30]+' sold7='+r[C.sold7]+' newUC='+r[C.newUC]+' newList7='+r[C.newList7]+' sar='+r[C.sar]);
+    log('Last year row '+lyRow+': active='+ly[C.active]+' uc='+ly[C.uc]);
+
+    // Get TR Closed from tracker tab — match by date in col 0
+    const currDate = r[C.date];
+    const lyDate   = ly[C.date];
+    let trNow = null, lyTR = null;
+    if (trackerRows.length > 1) {
+      for (let i=1; i<trackerRows.length; i++) {
+        const td = String(trackerRows[i][0]||'').trim();
+        if (td === String(currDate).trim() && trNow === null) trNow = num(trackerRows[i][trCol]);
+        if (td === String(lyDate).trim()   && lyTR  === null) lyTR  = num(trackerRows[i][trCol]);
+      }
+      // Fallback: if date match failed, use row index offset
+      if (trNow === null) {
+        const tci = Math.min(ci, trackerRows.length-1);
+        trNow = num(trackerRows[tci]?.[trCol]);
+        log('TR date match failed, using row index '+tci);
+      }
+      if (lyTR === null) {
+        const tly = Math.min(lyRow, trackerRows.length-1);
+        lyTR = num(trackerRows[tly]?.[trCol]);
+      }
+    }
+    log('Tracker row 1: '+trackerRows[1]?.join(' | '));
+    log('Tracker row 2: '+trackerRows[2]?.join(' | '));
+    log('Tracker row 3: '+trackerRows[3]?.join(' | '));
+    log('TR col: '+trCol);
+
+    // Current values
+    const curActive=num(r[C.active]), curUC=num(r[C.uc]), curSold30=num(r[C.sold30]);
+    const curSold7=num(r[C.sold7]), curNewUC=num(r[C.newUC]), curNewList=num(r[C.newList7]);
+    const curPrevList=num(r[C.prevNewList]), curSAR=num(r[C.sar]);
+
+    // Last year values
+    const lyActive=num(ly[C.active]), lyUC=num(ly[C.uc]), lySold30=num(ly[C.sold30]);
+    const lySold7=num(ly[C.sold7]), lyNewUC=num(ly[C.newUC]), lySAR=num(ly[C.sar]);
+
+    // KPI Cards
+    setKPI('currentActive','activeChange','activeCard',curActive,lyActive);
+    setKPI('underContract','ucChange','ucCard',curUC,lyUC);
+    setKPI('newListings7','newListingsChange','newListingsCard',curNewList,curPrevList);
+    setKPI('newUCWeek','newUCChange','newUCCard',curNewUC,num(ly[C.newUC]));
+    setKPI('sold30','sold30Change','sold30Card',curSold30,lySold30);
+    setKPI('sold7','sold7Change','sold7Card',curSold7,lySold7);
+
+    set('lastYearActive',lyActive); set('lastYearUC',lyUC);
+    set('lastWeekNewListings',curPrevList); set('lastYearNewUC',lyNewUC);
+    set('lastYearSold30',lySold30); set('lastYearSold7',lySold7);
+
+    // Market Share
+    set('sarNow',curSAR); set('trNow',trNow);
+    const msNow=(curSAR&&trNow)  ? ((trNow/curSAR)*100).toFixed(2)+'%' : '—';
+    const msLY =(lySAR &&lyTR)   ? ((lyTR/lySAR)*100).toFixed(2)+'%'  : '—';
+    set('marketShareNow',msNow); set('marketShareLastYr',msLY);
+    document.getElementById('sarLastYr').textContent = lySAR ?? '—';
+    document.getElementById('trLastYr').textContent  = lyTR  ?? '—';
+
+    if (curSAR&&trNow&&lySAR&&lyTR) {
+      const d=(((trNow/curSAR)-(lyTR/lySAR))*100).toFixed(2);
+      const pos=parseFloat(d)>=0;
+      const de=document.getElementById('marketShareDelta');
+      de.textContent=(pos?'+':'')+d+'%'; de.className='ms-delta-value'+(pos?' positive':'');
+      document.getElementById('msDeltaCard').className='ms-delta-card'+(pos?' positive':'');
+    }
+
+    // Date
+    set('dataDate', r[C.date]);
+    document.getElementById('weekBadge').textContent='Week of '+(r[C.date]||'—');
+    set('lastUpdated','Updated '+new Date().toLocaleTimeString());
+
+    // Charts
+    buildIndividualCharts(smlsRows, C);
+    buildYOYChart(smlsRows, C, trackerRows, trCol);
+
+    sb.className='status-bar success';
+    sb.textContent='✓ Live data loaded — '+smlsRows.length+' weeks | Current week: '+(r[C.date]||'—');
+
+  } catch(err) {
+    log('ERROR: '+err.message);
+    console.error(err);
+    sb.className='status-bar error';
+    sb.textContent='✗ '+err.message+' — Click Debug for details';
+    set('lastUpdated','Failed');
+    document.getElementById('debugSection').classList.add('visible');
+  }
+}
+
+loadData();
+</script>
+</body>
+</html>
