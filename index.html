@@ -30,6 +30,7 @@
   .status-bar { text-align: center; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 20px; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 1px; text-transform: uppercase; }
   .status-bar.loading { background: #1c2a1c; color: var(--muted); border: 1px solid var(--border); }
   .status-bar.success { background: var(--green-bg); color: var(--green); border: 1px solid #1a4a2a; }
+  .status-bar.warn { background: #2a2410; color: #d29922; border: 1px solid #4a3d12; }
   .status-bar.error { background: var(--red-bg); color: var(--red); border: 1px solid #4a1a1a; }
 
   .kpi-section { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
@@ -87,6 +88,7 @@
 </div>
 
 <div class="status-bar loading" id="statusBar">Connecting to Google Sheets...</div>
+<div class="status-bar warn" id="warnBar" style="display:none"></div>
 
 <div class="kpi-section">
   <div class="kpi-card neutral" id="activeCard">
@@ -215,122 +217,195 @@ function set(id, v) { const el=document.getElementById(id); if(el) el.textConten
 
 let chartActive=null, chartUC=null, chartNewList=null, yc=null;
 
-function buildYOYMultiChart(canvasId, titleText, colKey, color2023, color2024, color2025, color2026, rows, C, showYears) {
-  const SHOW_YEARS = showYears || ['2023','2024','2025','2026'];
-  const allColors = {'2023':color2023,'2024':color2024,'2025':color2025,'2026':color2026};
-  const colors = Object.fromEntries(SHOW_YEARS.map(k=>[k,allColors[k]]));
-  const widths  = {'2023':1.5,'2024':1.5,'2025':2,'2026':2.5};
-  const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// ── YEAR HELPERS START ───────────────────────────────────────────────────────
+// Charts show FIRST_YEAR through the newest year found in the sheet, so 2027
+// appears on its own once 2027 rows exist. Change FIRST_YEAR only if you want
+// to drop old years from the charts.
+const FIRST_YEAR = 2024;
+// Colors for past years, in order (2024, 2025, 2026, ...). The newest year always
+// uses each chart's accent color, so when 2027 arrives 2026 moves to a past color.
+const PAST_COLORS = ['#9b6b4a', '#c8b400', '#8e7cc3', '#e07b9b', '#5fa8d3', '#7fbf7b', '#d98e4a'];
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-  // Pre-pass: assign a year to every row by tracking month progression
-  // IMPORTANT: only process up to the last real data row (ci from main load)
-  // Find last row with actual active data first
-  let lastRealRow = rows.length - 1;
-  while (lastRealRow > 2 && (num(rows[lastRealRow][C.active]) === null || String(rows[lastRealRow][C.date]||'').trim() === '')) lastRealRow--;
-
-  // Anchor-based year assignment — we know lastRealRow = Feb 2026
-  // Walk backwards from that anchor assigning years based on month transitions
-  const ANCHOR_YEAR = 2026;
-  const ANCHOR_MONTH = 1; // February = index 1
-
+// Assign a year to every row. The newest row belongs to the current year (or last year if its
+// date is still well in the future), then walk backwards and drop a year each time the month
+// wraps from January back to December. Works at any time of year, no hardcoded dates.
+function assignRowYears(rows, C, lastRealRow) {
   const rowYears = [];
-  const rowMonths = [];
+  const monthOf = i => {
+    const parts = String(rows[i][C.date] || '').trim().split('/');
+    const m = parts.length >= 2 ? parseInt(parts[0]) - 1 : -1;
+    return isNaN(m) ? -1 : m;
+  };
+  const today = new Date();
+  let year = today.getFullYear();
+  const lastM = monthOf(lastRealRow);
+  const lastD = parseInt(String(rows[lastRealRow][C.date] || '').split('/')[1]) || 1;
+  if (lastM >= 0 && new Date(year, lastM, lastD) - today > 10 * 86400000) year--;
 
-  for (let i=0; i<rows.length; i++) {
-    const ds = String(rows[i][C.date]||'').trim();
-    const parts = ds.split('/');
-    rowMonths[i] = parts.length >= 2 ? parseInt(parts[0])-1 : -1;
-  }
-
-  rowYears[lastRealRow] = ANCHOR_YEAR;
-  let curYear = ANCHOR_YEAR;
-  let prevMonth = ANCHOR_MONTH;
-
-  // Walk backwards: when month jumps from low (Jan/Feb) to high (Nov/Dec), decrement year
-  for (let i=lastRealRow-1; i>=0; i--) {
-    const m = rowMonths[i];
-    if (m === -1) { rowYears[i] = curYear; continue; }
-    if (prevMonth <= 2 && m >= 10) curYear--;
-    rowYears[i] = curYear;
+  rowYears[lastRealRow] = year;
+  let prevMonth = lastM;
+  for (let i = lastRealRow - 1; i >= 0; i--) {
+    const m = monthOf(i);
+    if (m === -1) { rowYears[i] = year; continue; }
+    if (m - prevMonth > 6) year--;   // wrapped from Jan back to Dec
+    rowYears[i] = year;
     prevMonth = m;
   }
+  return rowYears;
+}
 
-  // Build per-year data using pre-assigned years
+// Last row that has real data (skips blank future rows at the bottom of the sheet)
+function findLastRealRow(rows, C) {
+  let i = rows.length - 1;
+  while (i > 2 && (num(rows[i][C.active]) === null || String(rows[i][C.date] || '').trim() === '')) i--;
+  return i;
+}
+
+function yearsToShow(currentYear) {
+  const out = [];
+  for (let y = FIRST_YEAR; y <= currentYear; y++) out.push(String(y));
+  return out;
+}
+
+function lineStyle(year, currentYear, accent) {
+  const y = parseInt(year);
+  const isCurrent = y === currentYear;
+  return {
+    color: isCurrent ? accent : PAST_COLORS[(y - FIRST_YEAR) % PAST_COLORS.length],
+    width: isCurrent ? 2.5 : (y === currentYear - 1 ? 2 : 1.5),
+    dots:  isCurrent ? 3 : 0
+  };
+}
+
+// Find the row for the same week last year by DATE (364 days back), not by counting rows,
+// so a skipped or duplicated week in the sheet can't throw the comparison off.
+function findLastYearRow(rows, C, rowYears, ci, headerRow) {
+  const toTime = i => {
+    const p = String(rows[i][C.date] || '').trim().split('/');
+    return new Date(rowYears[i], parseInt(p[0]) - 1, parseInt(p[1])).getTime();
+  };
+  const target = toTime(ci) - 364 * 86400000;
+  let best = -1, bestDiff = Infinity;
+  for (let i = headerRow + 1; i < ci; i++) {
+    if (num(rows[i][C.active]) === null) continue;
+    const t = toTime(i);
+    if (isNaN(t)) continue;
+    const diff = Math.abs(t - target);
+    if (diff < bestDiff) { bestDiff = diff; best = i; }
+  }
+  if (best === -1 || bestDiff > 6 * 86400000) return Math.max(headerRow + 1, ci - 52);
+  return best;
+}
+
+// Sanity checks. Returns a list of plain-English warnings (empty list = all good).
+function dataChecks(rows, C, rowYears, lastRealRow) {
+  const warns = [];
+  const currentYear = rowYears[lastRealRow];
+  const parts = String(rows[lastRealRow][C.date]).trim().split('/');
+  const lastDate = new Date(currentYear, parseInt(parts[0]) - 1, parseInt(parts[1]));
+
+  const ageDays = Math.floor((new Date() - lastDate) / 86400000);
+  if (ageDays > 10) warns.push('Newest data is from ' + parts[0] + '/' + parts[1] + ' (' + ageDays + ' days ago). The sheet may need updating.');
+
+  const counts = {};
+  for (let i = 2; i <= lastRealRow; i++) {
+    if (num(rows[i][C.active]) === null) continue;
+    counts[rowYears[i]] = (counts[rowYears[i]] || 0) + 1;
+  }
+  for (let y = FIRST_YEAR; y < currentYear; y++) {
+    const n = counts[y] || 0;
+    if (n < 48 || n > 54) warns.push(y + ' shows ' + n + ' weeks of data (expected about 52). Check the sheet dates.');
+  }
+  const doy = Math.round((lastDate - new Date(currentYear, 0, 0)) / 86400000);
+  const expected = Math.ceil(doy / 7);
+  const n = counts[currentYear] || 0;
+  if (Math.abs(n - expected) > 3) warns.push(currentYear + ' shows ' + n + ' weeks so far (expected about ' + expected + '). Check the sheet dates.');
+  return warns;
+}
+// ── YEAR HELPERS END ─────────────────────────────────────────────────────────
+
+function showWarnings(warns) {
+  const el = document.getElementById('warnBar');
+  if (!el) return;
+  if (warns.length) {
+    el.textContent = '⚠ Data check: ' + warns.join(' | ');
+    el.style.display = 'block';
+    warns.forEach(w => log('WARNING: ' + w));
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+// One chart builder for every year-over-year chart. valueAt(i) returns the number to plot for
+// sheet row i, or null to skip that row.
+function buildYearlyChart(canvasId, titleText, rows, C, accent, valueAt, isPercent) {
+  const lastRealRow = findLastRealRow(rows, C);
+  const rowYears = assignRowYears(rows, C, lastRealRow);
+  const currentYear = rowYears[lastRealRow];
+  const SHOW_YEARS = yearsToShow(currentYear);
+
   const years = {};
-  for (let i=2; i<=lastRealRow; i++) {
-    const r = rows[i];
-    const v = num(r[colKey]);
-    if (v === null || !r[C.date]) continue;
-    const ds = String(r[C.date]).trim();
-    const parts = ds.split('/');
+  for (let i = 2; i <= lastRealRow; i++) {
+    const v = valueAt(i);
+    if (v === null || v === undefined) continue;
+    const parts = String(rows[i][C.date] || '').trim().split('/');
     if (parts.length < 2) continue;
-    const month = parseInt(parts[0])-1;
-    const day   = parseInt(parts[1]);
-    if (isNaN(month)||isNaN(day)) continue;
+    const month = parseInt(parts[0]) - 1, day = parseInt(parts[1]);
+    if (isNaN(month) || isNaN(day)) continue;
     const key = String(rowYears[i]);
     if (!SHOW_YEARS.includes(key)) continue;
-    if (!years[key]) years[key] = [];
-    years[key].push({ x: month + day/31, y: v });
+    (years[key] = years[key] || []).push({ x: month + day / 31, y: v });
   }
-
-  log(titleText+' lastRealRow='+lastRealRow+' colKey='+colKey+' value at lastRealRow='+num(rows[lastRealRow][colKey]));
-  const lastRows = [];
-  for (let i=Math.max(0,rows.length-10); i<rows.length; i++) {
-    lastRows.push('row'+i+':'+String(rows[i][C.date]||'').trim()+'='+rowYears[i]);
-  }
-  log('Row year assignments (last 10): '+lastRows.join(' | '));
-  // Show last 3 points for 2026
-  if (years['2026']) {
-    const last3 = years['2026'].slice(-3);
-    log(titleText+' 2026 last 3 pts: '+JSON.stringify(last3));
-  }
+  log(titleText + ' weeks per year: ' + JSON.stringify(Object.fromEntries(Object.entries(years).map(([k, v]) => [k, v.length]))));
 
   const keys = SHOW_YEARS.filter(k => years[k] && years[k].length > 0);
   const existing = Chart.getChart(canvasId);
   if (existing) existing.destroy();
 
   return new Chart(document.getElementById(canvasId), {
-    type:'line',
-    data:{
-      datasets: keys.map(k=>({
-        label: k,
-        data: years[k],
-        borderColor: colors[k],
-        backgroundColor: 'transparent',
-        tension: 0.4,
-        pointRadius: k==='2026' ? 3 : 0,
-        pointHoverRadius: 5,
-        borderWidth: widths[k],
-        fill: false
-      }))
+    type: 'line',
+    data: {
+      datasets: keys.map(k => {
+        const s = lineStyle(k, currentYear, accent);
+        return {
+          label: k, data: years[k],
+          borderColor: s.color, backgroundColor: 'transparent',
+          tension: 0.4, pointRadius: s.dots, pointHoverRadius: 5,
+          borderWidth: s.width, fill: false
+        };
+      })
     },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        datalabels:{display:false},
-        legend:{ labels:{color:'#7d8590',font:{family:'Barlow Condensed',size:12},boxWidth:20,padding:16} },
-        title:{
-          display:true,
-          text: titleText.toUpperCase()+' — '+SHOW_YEARS.join(' / '),
-          color:'#e6edf3',
-          font:{family:'Barlow Condensed',size:13,weight:'700'},
-          align:'start', padding:{bottom:12}
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        datalabels: { display: false },
+        legend: { labels: { color: '#7d8590', font: { family: 'Barlow Condensed', size: 12 }, boxWidth: 20, padding: 16 } },
+        title: {
+          display: true,
+          text: titleText.toUpperCase() + ' — ' + SHOW_YEARS.join(' / '),
+          color: '#e6edf3',
+          font: { family: 'Barlow Condensed', size: 13, weight: '700' },
+          align: 'start', padding: { bottom: 12 }
         },
-        tooltip:{
-          backgroundColor:'#1c2330',titleColor:'#7d8590',bodyColor:'#e6edf3',borderColor:'#2a3441',borderWidth:1,
-          callbacks:{ title: ctx => MONTHS[Math.min(Math.floor(ctx[0].parsed.x),11)] }
+        tooltip: {
+          backgroundColor: '#1c2330', titleColor: '#7d8590', bodyColor: '#e6edf3', borderColor: '#2a3441', borderWidth: 1,
+          callbacks: {
+            title: ctx => MONTHS[Math.min(Math.floor(ctx[0].parsed.x), 11)],
+            label: ctx => ' ' + ctx.dataset.label + ': ' + ctx.parsed.y + (isPercent ? '%' : '')
+          }
         }
       },
-      scales:{
-        x:{
-          type:'linear', min:0, max:12,
-          ticks:{ color:'#7d8590',font:{size:11},stepSize:1, callback: val => MONTHS[Math.round(val)]??'' },
-          grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'transparent'}
+      scales: {
+        x: {
+          type: 'linear', min: 0, max: 12,
+          ticks: { color: '#7d8590', font: { size: 11 }, stepSize: 1, callback: val => MONTHS[Math.round(val)] ?? '' },
+          grid: { color: 'rgba(255,255,255,0.04)' }, border: { color: 'transparent' }
         },
-        y:{
-          ticks:{color:'#7d8590',font:{size:10}},
-          grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'transparent'}
+        y: {
+          ticks: { color: '#7d8590', font: { size: 10 }, callback: val => isPercent ? val + '%' : val },
+          grid: { color: 'rgba(255,255,255,0.04)' }, border: { color: 'transparent' }
         }
       }
     }
@@ -338,124 +413,26 @@ function buildYOYMultiChart(canvasId, titleText, colKey, color2023, color2024, c
 }
 
 function buildIndividualCharts(rows, C) {
-  buildYOYMultiChart('chartActive',  'SMLS Active Listings',    C.active,   null,'#9b6b4a','#c8b400','#00ffcc', rows, C, ['2024','2025','2026']);
-  buildYOYMultiChart('chartUC',      'Under Contract',          C.uc,       null,'#9b6b4a','#c8b400','#f85149', rows, C, ['2024','2025','2026']);
-  buildYOYMultiChart('chartNewList', 'New Listings Last 7 Days',C.newList7, null,'#9b6b4a','#c8b400','#3fb950', rows, C, ['2024','2025','2026']);
+  buildYearlyChart('chartActive',  'SMLS Active Listings',     rows, C, '#00ffcc', i => num(rows[i][C.active]));
+  buildYearlyChart('chartUC',      'Under Contract',           rows, C, '#f85149', i => num(rows[i][C.uc]));
+  buildYearlyChart('chartNewList', 'New Listings Last 7 Days', rows, C, '#3fb950', i => num(rows[i][C.newList7]));
 }
 
 function buildYOYChart(rows, C, trackerRows, trCol) {
-  const SHOW_YEARS = ['2024','2025','2026'];
-  const colors = {'2024':'#9b6b4a','2025':'#c8b400','2026':'#00ffcc'};
-  const widths  = {'2024':1.5,'2025':2,'2026':2.5};
-  const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-  // Build a date→TR lookup from tracker tab
+  // Date → TR Closed lookup from the Weekly Tracker Data tab
   const trByDate = {};
-  for (let i=1; i<trackerRows.length; i++) {
-    const d = String(trackerRows[i][0]||'').trim();
+  for (let i = 1; i < trackerRows.length; i++) {
+    const d = String(trackerRows[i][0] || '').trim();
     const v = num(trackerRows[i][trCol]);
     if (d && v !== null) trByDate[d] = v;
   }
-  log('TR by date sample: '+JSON.stringify(Object.entries(trByDate).slice(0,5)));
-
-  // Find lastRealRow
-  let lastRealRow = rows.length - 1;
-  while (lastRealRow > 2 && (num(rows[lastRealRow][C.active]) === null || String(rows[lastRealRow][C.date]||'').trim() === '')) lastRealRow--;
-
-  // Build rowYears using anchor
-  const rowMonths = [];
-  for (let i=0; i<rows.length; i++) {
-    const ds = String(rows[i][C.date]||'').trim();
-    const parts = ds.split('/');
-    rowMonths[i] = parts.length >= 2 ? parseInt(parts[0])-1 : -1;
-  }
-  const rowYears = [];
-  rowYears[lastRealRow] = 2026;
-  let curYear = 2026, prevMonth = 1;
-  for (let i=lastRealRow-1; i>=0; i--) {
-    const m = rowMonths[i];
-    if (m === -1) { rowYears[i] = curYear; continue; }
-    if (prevMonth <= 2 && m >= 10) curYear--;
-    rowYears[i] = curYear;
-    prevMonth = m;
-  }
-
-  const years = {};
-  for (let i=2; i<=lastRealRow; i++) {
-    const r = rows[i];
-    const sar = num(r[C.sar]);
-    if (sar === null || sar === 0) continue;
-    const dateStr = String(r[C.date]||'').trim();
-    const tr = trByDate[dateStr];
-    if (tr == null) continue;
-    const ms = parseFloat(((tr / sar) * 100).toFixed(2));
-    const parts = dateStr.split('/');
-    if (parts.length < 2) continue;
-    const month = parseInt(parts[0])-1;
-    const day   = parseInt(parts[1]);
-    if (isNaN(month)||isNaN(day)) continue;
-    const key = String(rowYears[i]);
-    if (!SHOW_YEARS.includes(key)) continue;
-    if (!years[key]) years[key] = [];
-    years[key].push({ x: month + day/31, y: ms });
-  }
-
-  log('TR Market Share years: '+JSON.stringify(Object.fromEntries(Object.entries(years).map(([k,v])=>[k,v.length]))));
-  if (years['2026']) log('MS 2026 last 3: '+JSON.stringify(years['2026'].slice(-3)));
-
-  const keys = SHOW_YEARS.filter(k => years[k] && years[k].length > 0);
-  const existing = Chart.getChart('yoyChart');
-  if (existing) existing.destroy();
-
-  new Chart(document.getElementById('yoyChart'), {
-    type:'line',
-    data:{
-      datasets: keys.map(k=>({
-        label: k,
-        data: years[k],
-        borderColor: colors[k],
-        backgroundColor: 'transparent',
-        tension: 0.4,
-        pointRadius: k==='2026' ? 3 : 0,
-        pointHoverRadius: 5,
-        borderWidth: widths[k],
-        fill: false
-      }))
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        datalabels:{display:false},
-        legend:{ labels:{color:'#7d8590',font:{family:'Barlow Condensed',size:12},boxWidth:20,padding:16} },
-        title:{
-          display:true,
-          text:'TR MARKET SHARE — 2024 / 2025 / 2026',
-          color:'#e6edf3',
-          font:{family:'Barlow Condensed',size:13,weight:'700'},
-          align:'start', padding:{bottom:12}
-        },
-        tooltip:{
-          backgroundColor:'#1c2330',titleColor:'#7d8590',bodyColor:'#e6edf3',borderColor:'#2a3441',borderWidth:1,
-          callbacks:{
-            title: ctx => MONTHS[Math.min(Math.floor(ctx[0].parsed.x),11)],
-            label: ctx => ' '+ctx.dataset.label+': '+ctx.parsed.y+'%'
-          }
-        }
-      },
-      scales:{
-        x:{
-          type:'linear', min:0, max:12,
-          ticks:{ color:'#7d8590',font:{size:11},stepSize:1, callback: val => MONTHS[Math.round(val)]??'' },
-          grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'transparent'}
-        },
-        y:{
-          ticks:{ color:'#7d8590',font:{size:10}, callback: val => val+'%' },
-          grid:{color:'rgba(255,255,255,0.04)'}, border:{color:'transparent'}
-        }
-      }
-    }
-  });
+  buildYearlyChart('yoyChart', 'TR Market Share', rows, C, '#00ffcc', i => {
+    const sar = num(rows[i][C.sar]);
+    if (sar === null || sar === 0) return null;
+    const tr = trByDate[String(rows[i][C.date] || '').trim()];
+    if (tr == null) return null;
+    return parseFloat(((tr / sar) * 100).toFixed(2));
+  }, true);
 }
 
 const SHEET_ID = '1OwfKjVqnJ9ZfkxXSOCNyvqtOKdnlWbg7OFIDHOUIDCY';
@@ -490,6 +467,7 @@ async function fetchCSV(url) {
 
 async function loadData() {
   logs=[];
+  const wb=document.getElementById('warnBar'); if (wb) wb.style.display='none';
   const sb=document.getElementById('statusBar');
   sb.className='status-bar loading'; sb.textContent='Connecting to Google Sheets...';
   set('lastUpdated','Loading...');
@@ -556,7 +534,8 @@ async function loadData() {
     let ci = smlsRows.length-1;
     while (ci > headerRow+1 && num(smlsRows[ci][C.active])===null) ci--;
     const r = smlsRows[ci];
-    const lyRow = Math.max(headerRow+1, ci-52);
+    const rowYears = assignRowYears(smlsRows, C, ci);
+    const lyRow = findLastYearRow(smlsRows, C, rowYears, ci, headerRow);
     const ly = smlsRows[lyRow] || [];
     log('Current row '+ci+': date='+r[C.date]+' active='+r[C.active]+' uc='+r[C.uc]+' sold30='+r[C.sold30]+' sold7='+r[C.sold7]+' newUC='+r[C.newUC]+' newList7='+r[C.newList7]+' sar='+r[C.sar]);
     log('Last year row '+lyRow+': active='+ly[C.active]+' uc='+ly[C.uc]);
@@ -632,6 +611,9 @@ async function loadData() {
     // Charts
     buildIndividualCharts(smlsRows, C);
     buildYOYChart(smlsRows, C, trackerRows, trCol);
+
+    // Plain-English warning if the dates or week counts look wrong
+    showWarnings(dataChecks(smlsRows, C, rowYears, ci));
 
     sb.className='status-bar success';
     sb.textContent='✓ Live data loaded — '+smlsRows.length+' weeks | Current week: '+(r[C.date]||'—');
