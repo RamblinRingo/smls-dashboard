@@ -458,19 +458,34 @@ function buildYOYChart(rows, C, trackerRows, trCol) {
   });
 }
 
+const SHEET_ID = '1OwfKjVqnJ9ZfkxXSOCNyvqtOKdnlWbg7OFIDHOUIDCY';
+
 async function fetchCSV(url) {
-  // Try direct fetch first (works when sheet is published publicly)
-  try {
-    const res = await fetch(url, { mode: 'cors' });
-    if (!res.ok) throw new Error('HTTP '+res.status);
-    return parseCSV(await res.text());
-  } catch(e) {
-    // Fallback to CORS proxy
-    log('Direct fetch failed, trying proxy: '+e.message);
-    const res = await fetch('https://corsproxy.io/?' + encodeURIComponent(url));
-    if (!res.ok) throw new Error('HTTP '+res.status+' (proxy)');
-    return parseCSV(await res.text());
+  const gid = (url.match(/[?&]gid=(\d+)/) || [])[1];
+  const gviz = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:csv&gid=' + gid;
+
+  // Try each route in order; log exactly why each one fails
+  const routes = [
+    { name: 'published CSV (direct)', url: url },
+    { name: 'gviz CSV (direct)',      url: gviz },
+    { name: 'corsproxy.io',           url: 'https://corsproxy.io/?' + encodeURIComponent(url) },
+    { name: 'allorigins',             url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url) }
+  ];
+
+  for (const r of routes) {
+    try {
+      const res = await fetch(r.url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const text = await res.text();
+      // Guard against HTML error/login pages being returned as "data"
+      if (/^\s*<(!doctype|html)/i.test(text)) throw new Error('got an HTML page, not CSV');
+      log('gid ' + gid + ' loaded via ' + r.name);
+      return parseCSV(text);
+    } catch (e) {
+      log('gid ' + gid + ' FAILED via ' + r.name + ': ' + e.message);
+    }
   }
+  throw new Error('All fetch routes failed for gid ' + gid + ' (see Debug log)');
 }
 
 async function loadData() {
